@@ -1,6 +1,6 @@
 use crate::error::NftVoterError;
 use crate::state::*;
-use crate::tools::accounts::close_nft_action_ticket_account;
+use crate::tools::accounts::close_nft_tickets_table_account;
 use anchor_lang::prelude::*;
 
 /// Updates VoterWeightRecord to evaluate governance power for non voting use cases: CreateProposal, CreateGovernance etc...

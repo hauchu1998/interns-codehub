@@ -1,6 +1,6 @@
 use crate::error::NftVoterError;
 use crate::{ id, state::* };
-use crate::tools::accounts::close_nft_action_ticket_account;
+use crate::tools::accounts::close_nft_tickets_table_account;
 use anchor_lang::prelude::*;
 use anchor_lang::Accounts;
 use itertools::Itertools;
@@ -67,7 +67,15 @@ pub fn cast_nft_vote<'a, 'b, 'c, 'info>(
     let mut to_closed_accounts = vec![];
     let mut unique_nft_action_tickets: Vec<Pubkey> = vec![];
 
-    for (nft_action_ticket_info, nft_vote_record_info) in ctx.remaining_accounts.iter().tuples() {
+    let (first_account, nft_voter_records) = ctx.remaining_accounts.split_at(1);
+    let mut nft_tickets_table = &first_account[0];
+    let data_bytes = nft_tickets_table.try_borrow_mut_data()?;
+    let nft_tickets_table_data = NftTicketTable::try_from_slice(&data_bytes)?;
+
+    for nft_tickets in nft_tickets_table_data.nft_tickets.iter() {
+    }
+
+    for nft_vote_record_info in remaining_accounts.iter() {
         if unique_nft_action_tickets.contains(&nft_action_ticket_info.key) {
             return Err(NftVoterError::DuplicatedNftDetected.into());
         }

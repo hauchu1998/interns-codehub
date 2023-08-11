@@ -15,12 +15,3 @@ pub struct NftVoteRecord {
     /// It's a Realm member pubkey corresponding to TokenOwnerRecord.governing_token_owner
     pub governing_token_owner: Pubkey,
 }
-
-#[account]
-pub struct NftActionTicket {
-    pub registrar: Pubkey,
-    pub governing_token_owner: Pubkey,
-    pub nft_mint: Pubkey,
-    pub weight: u64,
-    pub expiry: Option<u64>,
-}

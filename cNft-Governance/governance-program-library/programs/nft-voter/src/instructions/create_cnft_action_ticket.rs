@@ -2,7 +2,7 @@ use crate::error::NftVoterError;
 use crate::state::*;
 use anchor_lang::prelude::*;
 use spl_account_compression::program::SplAccountCompression;
-use crate::tools::accounts::create_nft_action_ticket_account;
+use crate::tools::accounts::create_nft_tickets_table_account;
 
 /// Create NFT action ticket. Everytime a voter want to do some voting with NFT, they need to get a ticket first.
 /// This instruction will check the validation of the NFT and create a ticket for the voter.
@@ -37,15 +37,42 @@ pub struct CreateCnftActionTicket<'info> {
 pub fn create_cnft_action_ticket<'info>(
     ctx: Context<'_, '_, '_, 'info, CreateCnftActionTicket<'info>>,
     voter_weight_action: VoterWeightAction,
+    max_nfts: u8,
     params: Vec<CompressedNftAsset>
 ) -> Result<()> {
     let registrar = &ctx.accounts.registrar;
     let governing_token_owner = &ctx.accounts.voter_weight_record.governing_token_owner;
-    let remaining_accounts = &mut ctx.remaining_accounts.to_vec();
     let compression_program = &ctx.accounts.compression_program.to_account_info();
     let system_program = &ctx.accounts.system_program.to_account_info();
     let payer = &ctx.accounts.payer.to_account_info();
     let mut unique_asset_ids: Vec<Pubkey> = vec![];
+    let ticket_type = format!("nft-{}-ticket", &VoterWeightAction::CastVote).to_string();
+
+    let (first_account, remaining_accounts) = ctx.remaining_accounts.split_at(1);
+    let mut nft_tickets_table = &first_account[0];
+    if nft_tickets_table.data_is_empty() {
+        create_nft_tickets_table_account(
+            payer,
+            &nft_tickets_table,
+            &registrar.key().clone(),
+            &governing_token_owner.key().clone(),
+            max_nfts,
+            &ticket_type,
+            system_program
+        )?;
+
+        let serialized_data = NftTicketTable {
+            registrar: registrar.key().clone(),
+            governing_token_owner: governing_token_owner.key().clone(),
+            nft_tickets: vec![],
+            reserved: [0u8; 128],
+        };
+
+        nft_tickets_table.data.borrow_mut().copy_from_slice(&serialized_data.try_to_vec()?);
+    }
+
+    let data_bytes = nft_tickets_table.try_borrow_mut_data()?;
+    let mut nft_tickets_table_data = NftTicketTable::try_from_slice(&data_bytes)?;
 
     let mut start = 0;
     for i in 0..params.len() {
@@ -56,7 +83,6 @@ pub fn create_cnft_action_ticket<'info>(
         let tree_account = accounts[0].clone();
         let proofs = accounts[1..(proof_len as usize) + 1].to_vec();
         let cnft_action_ticket_info = accounts.last().unwrap().clone();
-        let ticket_type = format!("nft-{}-ticket", &voter_weight_action).to_string();
 
         let (cnft_vote_weight, asset_id) = resolve_cnft_vote_weight(
             &registrar,
@@ -68,30 +94,20 @@ pub fn create_cnft_action_ticket<'info>(
             compression_program
         )?;
 
-        create_nft_action_ticket_account(
-            payer,
-            &cnft_action_ticket_info,
-            &registrar.key().clone(),
-            &governing_token_owner,
-            &asset_id,
-            &ticket_type,
-            system_program
-        )?;
-        let serialized_data = NftActionTicket {
-            account_discriminator: NftActionTicket::ACCOUNT_DISCRIMINATOR,
-            registrar: registrar.key().clone(),
-            governing_token_owner: governing_token_owner.clone(),
+        let nft_action_ticket = NftActionTicket {
             nft_mint: asset_id.clone(),
             weight: cnft_vote_weight,
             expiry: Some(Clock::get()?.slot + 10),
         };
-        // serialize_nft_action_ticket_account(
-        //     &serialized_data.try_to_vec()?,
-        //     &mut cnft_action_ticket_info
-        // )?;
-        cnft_action_ticket_info.data.borrow_mut().copy_from_slice(&serialized_data.try_to_vec()?);
 
-        start += (proof_len as usize) + 2;
+        let ticket_idx = nft_tickets_table_data.nft_tickets
+            .iter()
+            .position(|x| x.nft_mint == asset_id);
+        if let Some(ticket_idx) = ticket_idx {
+            nft_tickets_table_data.nft_tickets[ticket_idx] = nft_action_ticket;
+        } else {
+            nft_tickets_table_data.nft_tickets.push(nft_action_ticket);
+        }
     }
 
     Ok(())

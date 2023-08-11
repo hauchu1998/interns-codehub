@@ -8,27 +8,17 @@ use solana_program::program::invoke_signed;
 use solana_program::msg;
 use crate::state::*;
 
-pub fn create_nft_action_ticket_account<'a>(
+pub fn create_nft_tickets_table_account<'a>(
     payer: &AccountInfo<'a>,
     account_info: &AccountInfo<'a>,
     registrar: &Pubkey,
     owner: &Pubkey,
-    nft_mint: &Pubkey,
+    max_nfts: u8,
     ticket_type: &str,
     system_program: &AccountInfo<'a>
 ) -> Result<(), ProgramError> {
-    let account_address_seeds = get_nft_action_ticket_seeds(
-        ticket_type,
-        registrar,
-        owner,
-        nft_mint
-    );
-    let (account_address, bump_seed) = get_nft_action_ticket_address(
-        ticket_type,
-        registrar,
-        owner,
-        nft_mint
-    );
+    let account_address_seeds = get_nft_tickets_table_seeds(ticket_type, registrar, owner);
+    let (account_address, bump_seed) = get_nft_tickets_table_address(ticket_type, registrar, owner);
 
     if account_address != *account_info.key {
         msg!(
@@ -41,7 +31,7 @@ pub fn create_nft_action_ticket_account<'a>(
 
     let rent = Rent::get()?;
 
-    let lamports = rent.minimum_balance(NFT_ACTION_TICKET_SIZE);
+    let lamports = rent.minimum_balance(NftTicketTable::get_space(max_nfts));
     let mut signers_seeds = account_address_seeds.to_vec();
     let bump = &[bump_seed];
     signers_seeds.push(bump);
@@ -50,7 +40,7 @@ pub fn create_nft_action_ticket_account<'a>(
         payer.key,
         &account_address,
         lamports,
-        NFT_ACTION_TICKET_SIZE as u64,
+        NftTicketTable::get_space(max_nfts) as u64,
         &crate::id()
     );
 
@@ -62,7 +52,7 @@ pub fn create_nft_action_ticket_account<'a>(
     Ok(())
 }
 
-pub fn serialize_nft_action_ticket_account(
+pub fn serialize_nft_tickets_table_account(
     serialized_data: &Vec<u8>,
     account_info: &AccountInfo
 ) -> Result<(), ProgramError> {
@@ -70,7 +60,7 @@ pub fn serialize_nft_action_ticket_account(
     Ok(())
 }
 
-pub fn close_nft_action_ticket_account(
+pub fn close_nft_tickets_table_account(
     account_info: &AccountInfo,
     beneficiary_info: &AccountInfo
 ) -> Result<(), ProgramError> {
