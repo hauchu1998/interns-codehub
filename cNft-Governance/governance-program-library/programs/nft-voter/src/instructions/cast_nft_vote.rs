@@ -1,9 +1,7 @@
 use crate::error::NftVoterError;
 use crate::{ id, state::* };
-use crate::tools::accounts::close_nft_tickets_table_account;
 use anchor_lang::prelude::*;
 use anchor_lang::Accounts;
-use itertools::Itertools;
 use spl_governance_tools::account::create_and_serialize_account_signed;
 
 /// Casts NFT vote. The NFTs used for voting are tracked using NftVoteRecord accounts
@@ -17,10 +15,17 @@ use spl_governance_tools::account::create_and_serialize_account_signed;
 /// VoteChoice is recorded by spl-gov in VoteRecord and this CastNftVote only tracks voting NFTs
 ///
 #[derive(Accounts)]
-#[instruction(proposal: Pubkey)]
+#[instruction(proposal: Pubkey, governing_token_owner:Pubkey, nft_ticket_table_bump: u8,)]
 pub struct CastNftVote<'info> {
     /// The NFT voting registrar
     pub registrar: Account<'info, Registrar>,
+
+    #[account(
+        mut, 
+        seeds=[b"nft-CastVote-tickets".as_ref(), registrar.key().as_ref(), governing_token_owner.as_ref()],
+        bump=nft_ticket_table_bump,
+        close=payer)]
+    pub nft_tickets_table: Account<'info, NftTicketTable>,
 
     #[account(
         mut,
@@ -49,11 +54,13 @@ pub struct CastNftVote<'info> {
 /// Casts vote with the NFT
 pub fn cast_nft_vote<'a, 'b, 'c, 'info>(
     ctx: Context<'a, 'b, 'c, 'info, CastNftVote<'info>>,
-    proposal: Pubkey
+    proposal: Pubkey,
+    governing_token_owner: Pubkey,
+    nft_ticket_table_bump: u8
 ) -> Result<()> {
     let registrar = &ctx.accounts.registrar;
     let voter_weight_record = &mut ctx.accounts.voter_weight_record;
-    let payer = &mut ctx.accounts.payer.to_account_info();
+    let nft_tickets_table = &ctx.accounts.nft_tickets_table;
     let rent = Rent::get()?;
     let mut voter_weight = 0u64;
 
@@ -64,84 +71,71 @@ pub fn cast_nft_vote<'a, 'b, 'c, 'info>(
         voter_weight_record
     )?;
 
-    let mut to_closed_accounts = vec![];
     let mut unique_nft_action_tickets: Vec<Pubkey> = vec![];
 
-    let (first_account, nft_voter_records) = ctx.remaining_accounts.split_at(1);
-    let mut nft_tickets_table = &first_account[0];
-    let data_bytes = nft_tickets_table.try_borrow_mut_data()?;
-    let nft_tickets_table_data = NftTicketTable::try_from_slice(&data_bytes)?;
+    require!(
+        *nft_tickets_table.to_account_info().owner == crate::id(),
+        NftVoterError::InvalidAccountOwner
+    );
+    // let ticket_type = format!("nft-{}-tickets", &VoterWeightAction::CastVote).to_string();
+    // let nft_tickets_table_address = get_nft_tickets_table_address(
+    //     &ticket_type,
+    //     &registrar.key(),
+    //     &governing_token_owner
+    // ).0;
 
-    for nft_tickets in nft_tickets_table_data.nft_tickets.iter() {
-    }
+    require!(
+        nft_tickets_table.governing_token_owner == governing_token_owner,
+        NftVoterError::InvalidNftTicketTable
+    );
 
-    for nft_vote_record_info in remaining_accounts.iter() {
-        if unique_nft_action_tickets.contains(&nft_action_ticket_info.key) {
+    let nft_vote_records = ctx.remaining_accounts;
+    for nft_ticket in nft_tickets_table.nft_tickets.iter() {
+        if unique_nft_action_tickets.contains(&nft_ticket.nft_mint) {
             return Err(NftVoterError::DuplicatedNftDetected.into());
         }
-        // Create NFT vote record to ensure the same NFT hasn't been already used for voting
-        // Note: The correct PDA of the NftVoteRecord is validated in create_and_serialize_account_signed
-        // It ensures the NftVoteRecord is for ('nft-vote-record',proposal,nft_mint) seeds
-        require!(nft_vote_record_info.data_is_empty(), NftVoterError::NftAlreadyVoted);
-        require!(
-            !nft_action_ticket_info.data_is_empty(), //this might be a problem
-            NftVoterError::NftFailedVerification
-        );
-        require!(*nft_action_ticket_info.owner == crate::id(), NftVoterError::InvalidAccountOwner);
 
-        // Note: deserializa NftActionTicket to ownership checking and get nft voting weight
-        // It ensure the NftActionTicket is for (nft-{action}-ticket,registrar,governing_token_owner,nft_mint) seeds
-        let data_bytes = nft_action_ticket_info.data.clone();
-        let data = NftActionTicket::try_from_slice(&data_bytes.borrow())?;
-        let ticket_type = format!("nft-{}-ticket", &VoterWeightAction::CastVote).to_string();
-        let nft_action_ticket_address = get_nft_action_ticket_address(
-            &ticket_type,
-            &registrar.key(),
-            &governing_token_owner,
-            &data.nft_mint
-        ).0;
+        require!(nft_ticket.expiry.unwrap() >= Clock::get()?.slot, NftVoterError::NftTicketExpired);
+        let weight = nft_ticket.weight;
 
-        require!(
-            data.governing_token_owner == governing_token_owner &&
-                nft_action_ticket_address == *nft_action_ticket_info.key,
-            NftVoterError::InvalidNftTicket
-        );
+        let nft_vote_record_address = get_nft_vote_record_address(&proposal, &nft_ticket.nft_mint);
+        let idx = nft_vote_records.iter().position(|x| *x.key == nft_vote_record_address);
+        if let Some(dx) = idx {
+            let nft_vote_record_info = &nft_vote_records[dx];
+            require!(nft_vote_record_info.data_is_empty(), NftVoterError::NftAlreadyVoted);
 
-        require!(data.expiry.unwrap() >= Clock::get()?.slot, NftVoterError::NftTicketExpired);
+            // Note: proposal.governing_token_mint must match voter_weight_record.governing_token_mint
+            // We don't verify it here because spl-gov does the check in cast_vote
+            // and it would reject voter_weight_record if governing_token_mint doesn't match
 
-        // Note: proposal.governing_token_mint must match voter_weight_record.governing_token_mint
-        // We don't verify it here because spl-gov does the check in cast_vote
-        // and it would reject voter_weight_record if governing_token_mint doesn't match
+            // Note: Once the NFT plugin is enabled the governing_token_mint is used only as identity
+            // for the voting population and the tokens of that mint are no longer used
+            let nft_vote_record = NftVoteRecord {
+                account_discriminator: NftVoteRecord::ACCOUNT_DISCRIMINATOR,
+                proposal,
+                nft_mint: nft_ticket.nft_mint.clone(),
+                governing_token_owner,
+                reserved: [0; 8],
+            };
 
-        // Note: Once the NFT plugin is enabled the governing_token_mint is used only as identity
-        // for the voting population and the tokens of that mint are no longer used
-        let nft_vote_record = NftVoteRecord {
-            account_discriminator: NftVoteRecord::ACCOUNT_DISCRIMINATOR,
-            proposal,
-            nft_mint: data.nft_mint.clone(),
-            governing_token_owner,
-            reserved: [0; 8],
-        };
+            // Anchor doesn't natively support dynamic account creation using remaining_accounts
+            // and we have to take it on the manual drive
+            create_and_serialize_account_signed(
+                &ctx.accounts.payer.to_account_info(),
+                nft_vote_record_info,
+                &nft_vote_record,
+                &get_nft_vote_record_seeds(&proposal, &nft_ticket.nft_mint),
+                &id(),
+                &ctx.accounts.system_program.to_account_info(),
+                &rent,
+                0
+            )?;
+        } else {
+            return Err(NftVoterError::InvalidVoteRecordForNftVoteRecord.into());
+        }
 
-        // Anchor doesn't natively support dynamic account creation using remaining_accounts
-        // and we have to take it on the manual drive
-        create_and_serialize_account_signed(
-            &ctx.accounts.payer.to_account_info(),
-            nft_vote_record_info,
-            &nft_vote_record,
-            &get_nft_vote_record_seeds(&proposal, &data.nft_mint),
-            &id(),
-            &ctx.accounts.system_program.to_account_info(),
-            &rent,
-            0
-        )?;
-
-        // adding this is the close the account after cpi transaction
-        // https://solana.stackexchange.com/questions/4481/error-processing-instruction-0-sum-of-account-balances-before-and-after-instruc
-        // https://solana.stackexchange.com/questions/4519/anchor-error-error-processing-instruction-0-sum-of-account-balances-before-and
-        to_closed_accounts.push(nft_action_ticket_info.to_account_info());
-        unique_nft_action_tickets.push(nft_action_ticket_info.key());
-        voter_weight = voter_weight.checked_add(data.weight).unwrap();
+        unique_nft_action_tickets.push(nft_ticket.nft_mint);
+        voter_weight = voter_weight.checked_add(weight).unwrap();
     }
 
     if
@@ -164,8 +158,5 @@ pub fn cast_nft_vote<'a, 'b, 'c, 'info>(
     voter_weight_record.weight_action = Some(VoterWeightAction::CastVote);
     voter_weight_record.weight_action_target = Some(proposal);
 
-    for clased_account in to_closed_accounts.iter() {
-        close_nft_action_ticket_account(clased_account, payer)?;
-    }
     Ok(())
 }

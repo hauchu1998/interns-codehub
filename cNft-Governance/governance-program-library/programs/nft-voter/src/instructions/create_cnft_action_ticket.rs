@@ -38,6 +38,7 @@ pub fn create_cnft_action_ticket<'info>(
     ctx: Context<'_, '_, '_, 'info, CreateCnftActionTicket<'info>>,
     voter_weight_action: VoterWeightAction,
     max_nfts: u8,
+    nft_ticket_table_bump: u8,
     params: Vec<CompressedNftAsset>
 ) -> Result<()> {
     let registrar = &ctx.accounts.registrar;
@@ -46,10 +47,10 @@ pub fn create_cnft_action_ticket<'info>(
     let system_program = &ctx.accounts.system_program.to_account_info();
     let payer = &ctx.accounts.payer.to_account_info();
     let mut unique_asset_ids: Vec<Pubkey> = vec![];
-    let ticket_type = format!("nft-{}-ticket", &VoterWeightAction::CastVote).to_string();
+    let ticket_type = format!("nft-{}-tickets", &voter_weight_action).to_string();
 
     let (first_account, remaining_accounts) = ctx.remaining_accounts.split_at(1);
-    let mut nft_tickets_table = &first_account[0];
+    let nft_tickets_table = &first_account[0];
     if nft_tickets_table.data_is_empty() {
         create_nft_tickets_table_account(
             payer,
@@ -58,6 +59,7 @@ pub fn create_cnft_action_ticket<'info>(
             &governing_token_owner.key().clone(),
             max_nfts,
             &ticket_type,
+            &[nft_ticket_table_bump],
             system_program
         )?;
 
@@ -78,11 +80,10 @@ pub fn create_cnft_action_ticket<'info>(
     for i in 0..params.len() {
         let param = &params[i];
         let proof_len = param.proof_len;
-        let accounts = &remaining_accounts[start..start + (proof_len as usize) + 2];
+        let accounts = &remaining_accounts[start..start + (proof_len as usize) + 1];
 
         let tree_account = accounts[0].clone();
         let proofs = accounts[1..(proof_len as usize) + 1].to_vec();
-        let cnft_action_ticket_info = accounts.last().unwrap().clone();
 
         let (cnft_vote_weight, asset_id) = resolve_cnft_vote_weight(
             &registrar,
@@ -108,6 +109,8 @@ pub fn create_cnft_action_ticket<'info>(
         } else {
             nft_tickets_table_data.nft_tickets.push(nft_action_ticket);
         }
+
+        start += (proof_len as usize) + 1;
     }
 
     Ok(())

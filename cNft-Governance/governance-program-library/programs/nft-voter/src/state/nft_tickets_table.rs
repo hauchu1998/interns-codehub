@@ -38,23 +38,3 @@ impl NftTicketTable {
         DISCRIMINATOR_SIZE + 32 * 2 + 4 + (max_nfts as usize) * NftActionTicket::get_space() + 128
     }
 }
-
-/// ticket_type = format!("nft-{}-ticket", &voter_weight_action).to_string();
-pub fn get_nft_tickets_table_seeds<'a>(
-    ticket_type: &'a str,
-    registrar: &'a Pubkey,
-    owner: &'a Pubkey
-) -> [&'a [u8]; 3] {
-    [&ticket_type.as_bytes(), registrar.as_ref(), owner.as_ref()]
-}
-
-pub fn get_nft_tickets_table_address(
-    ticket_type: &str,
-    registrar: &Pubkey,
-    owner: &Pubkey
-) -> (Pubkey, u8) {
-    Pubkey::find_program_address(
-        &get_nft_tickets_table_seeds(ticket_type, registrar, owner),
-        &crate::id()
-    )
-}

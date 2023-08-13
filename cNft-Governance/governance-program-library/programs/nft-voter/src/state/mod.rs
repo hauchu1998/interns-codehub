@@ -15,7 +15,7 @@ pub mod voter_weight_record;
 pub use cnft_verification::*;
 pub mod cnft_verification;
 
-pub use nft_action_ticket::*;
-pub mod nft_action_ticket;
+pub use nft_tickets_table::*;
+pub mod nft_tickets_table;
 
 pub mod idl_types;

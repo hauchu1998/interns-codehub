@@ -35,10 +35,17 @@ pub mod nft_voter {
     }
     pub fn update_voter_weight_record(
         ctx: Context<UpdateVoterWeightRecord>,
-        voter_weight_action: VoterWeightAction
+        voter_weight_action: VoterWeightAction,
+        governing_token_owner: Pubkey,
+        nft_ticket_table_bump: u8
     ) -> Result<()> {
         log_version();
-        instructions::update_voter_weight_record(ctx, voter_weight_action)
+        instructions::update_voter_weight_record(
+            ctx,
+            voter_weight_action,
+            governing_token_owner,
+            nft_ticket_table_bump
+        )
     }
 
     pub fn relinquish_nft_vote(ctx: Context<RelinquishNftVote>) -> Result<()> {
@@ -56,27 +63,44 @@ pub mod nft_voter {
 
     pub fn cast_nft_vote<'a, 'b, 'c, 'info>(
         ctx: Context<'a, 'b, 'c, 'info, CastNftVote<'info>>,
-        proposal: Pubkey
+        proposal: Pubkey,
+        governing_token_owner: Pubkey,
+        nft_ticket_table_bump: u8
     ) -> Result<()> {
         log_version();
-        instructions::cast_nft_vote(ctx, proposal)
+        instructions::cast_nft_vote(ctx, proposal, governing_token_owner, nft_ticket_table_bump)
     }
 
     pub fn create_nft_action_ticket<'a, 'b, 'c, 'info>(
         ctx: Context<'a, 'b, 'c, 'info, CreateNftActionTicket<'info>>,
-        voter_weight_action: VoterWeightAction
+        voter_weight_action: VoterWeightAction,
+        max_nfts: u8,
+        nft_ticket_table_bump: u8
     ) -> Result<()> {
         log_version();
-        instructions::create_nft_action_ticket(ctx, voter_weight_action)
+        instructions::create_nft_action_ticket(
+            ctx,
+            voter_weight_action,
+            max_nfts,
+            nft_ticket_table_bump
+        )
     }
 
     pub fn create_cnft_action_ticket<'a, 'b, 'c, 'info>(
         ctx: Context<'a, 'b, 'c, 'info, CreateCnftActionTicket<'info>>,
         voter_weight_action: VoterWeightAction,
+        max_nfts: u8,
+        nft_ticket_table_bump: u8,
         params: Vec<CompressedNftAsset>
     ) -> Result<()> {
         log_version();
-        instructions::create_cnft_action_ticket(ctx, voter_weight_action, params)
+        instructions::create_cnft_action_ticket(
+            ctx,
+            voter_weight_action,
+            max_nfts,
+            nft_ticket_table_bump,
+            params
+        )
     }
 }
 

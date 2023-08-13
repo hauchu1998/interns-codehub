@@ -89,6 +89,6 @@ pub enum NftVoterError {
     #[msg("Nft Ticket Expired")]
     NftTicketExpired,
 
-    #[msg("Voter With Invalid Ticket")]
-    InvalidNftTicket,
+    #[msg("Voter With Invalid Ticket Table")]
+    InvalidNftTicketTable,
 }

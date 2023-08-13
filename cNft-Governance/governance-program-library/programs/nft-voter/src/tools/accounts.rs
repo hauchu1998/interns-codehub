@@ -8,6 +8,27 @@ use solana_program::program::invoke_signed;
 use solana_program::msg;
 use crate::state::*;
 
+/// ticket_type = format!("nft-{}-tickets", &voter_weight_action).to_string();
+pub fn get_nft_tickets_table_seeds<'a>(
+    ticket_type: &'a str,
+    registrar: &'a Pubkey,
+    owner: &'a Pubkey,
+    bump: &'a [u8]
+) -> [&'a [u8]; 4] {
+    [&ticket_type.as_bytes(), registrar.as_ref(), owner.as_ref(), bump.as_ref()]
+}
+
+pub fn get_nft_tickets_table_address(
+    ticket_type: &str,
+    registrar: &Pubkey,
+    owner: &Pubkey,
+    bump: &[u8]
+) -> Result<Pubkey, ProgramError> {
+    let seeds = get_nft_tickets_table_seeds(ticket_type, registrar, owner, bump);
+    let address = Pubkey::create_program_address(&seeds, &crate::id())?;
+    Ok(address)
+}
+
 pub fn create_nft_tickets_table_account<'a>(
     payer: &AccountInfo<'a>,
     account_info: &AccountInfo<'a>,
@@ -15,10 +36,16 @@ pub fn create_nft_tickets_table_account<'a>(
     owner: &Pubkey,
     max_nfts: u8,
     ticket_type: &str,
+    bump_seed: &[u8],
     system_program: &AccountInfo<'a>
 ) -> Result<(), ProgramError> {
-    let account_address_seeds = get_nft_tickets_table_seeds(ticket_type, registrar, owner);
-    let (account_address, bump_seed) = get_nft_tickets_table_address(ticket_type, registrar, owner);
+    let account_address_seeds = get_nft_tickets_table_seeds(
+        ticket_type,
+        registrar,
+        owner,
+        bump_seed
+    );
+    let account_address = get_nft_tickets_table_address(ticket_type, registrar, owner, bump_seed)?;
 
     if account_address != *account_info.key {
         msg!(
@@ -33,8 +60,7 @@ pub fn create_nft_tickets_table_account<'a>(
 
     let lamports = rent.minimum_balance(NftTicketTable::get_space(max_nfts));
     let mut signers_seeds = account_address_seeds.to_vec();
-    let bump = &[bump_seed];
-    signers_seeds.push(bump);
+    signers_seeds.push(bump_seed);
 
     let create_account_instruction = create_account(
         payer.key,
